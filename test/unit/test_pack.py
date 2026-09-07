@@ -26,6 +26,7 @@ from pyocd.target.pack import (cmsis_pack, flash_algo, pack_target)
 from pyocd.target.pack.flm_region_builder import FlmFlashRegionBuilder
 from pyocd.target import TARGET
 from pyocd.core import memory_map
+from pyocd.core.session import Session
 from pyocd.utility.mask import align_down
 from pyocd.coresight.ap import APv1Address
 
@@ -401,3 +402,109 @@ class TestAPID:
         assert m0p.ap_address == APv1Address(2)
         assert m0p.svd_path == "cm0p.svd"
 
+
+class TestPackCacheDir:
+    """@brief Tests for the configurable 'pack.cache_dir' session option.
+
+    These tests cover propagation of a user-configured CMSIS-Pack storage path to
+    cmsis_pack_manager.Cache, relative path resolution, and default (unset) backward-compatible
+    behaviour.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_current_session(self):
+        # Session.get_current() caches a lazily-created default session; make sure each test
+        # gets a fresh one so option changes in one test don't leak into another.
+        Session._current_session = None
+        Session._options_session = None
+        yield
+        Session._current_session = None
+        Session._options_session = None
+
+    def test_default_path_is_none(self):
+        session = Session(None, **{'pack.cache_dir': None})
+        assert pack_target.get_configured_pack_cache_path(session) is None
+
+    def test_absolute_path_used_as_is(self, tmp_path):
+        configured = str(tmp_path / "packcache")
+        session = Session(None, **{'pack.cache_dir': configured})
+        assert pack_target.get_configured_pack_cache_path(session) == configured
+
+    def test_relative_path_resolved_against_project_dir(self, tmp_path):
+        session = Session(None, project_dir=str(tmp_path), **{'pack.cache_dir': "packs"})
+        assert pack_target.get_configured_pack_cache_path(session) == str(tmp_path / "packs")
+
+    def test_user_and_env_vars_expanded(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PYOCD_TEST_PACK_ROOT", str(tmp_path))
+        session = Session(None, **{'pack.cache_dir': "$PYOCD_TEST_PACK_ROOT/packs"})
+        assert pack_target.get_configured_pack_cache_path(session) == str(tmp_path / "packs")
+
+    def test_uses_session_get_current_by_default(self, tmp_path):
+        configured = str(tmp_path / "packcache")
+        session = Session(None, **{'pack.cache_dir': configured})
+        # No explicit session passed; should fall back to Session.get_current(). Keep a strong
+        # reference to the session so it isn't garbage collected (get_current() only holds a
+        # weak reference to the most recently created session).
+        assert pack_target.get_configured_pack_cache_path() == configured
+        del session
+
+    def test_get_pack_cache_passes_configured_path(self, tmp_path, monkeypatch):
+        configured = str(tmp_path / "packcache")
+        session = Session(None, **{'pack.cache_dir': configured})
+
+        captured = {}
+        class FakeCache:
+            def __init__(self, silent, verify, json_path=None, data_path=None):
+                captured['silent'] = silent
+                captured['verify'] = verify
+                captured['json_path'] = json_path
+                captured['data_path'] = data_path
+        monkeypatch.setattr(cmsis_pack_manager, 'Cache', FakeCache)
+
+        pack_target.ManagedPacksImpl.get_pack_cache(True, False, session=session)
+
+        assert captured == {
+            'silent': True,
+            'verify': False,
+            'json_path': configured,
+            'data_path': configured,
+            }
+
+    def test_get_pack_cache_default_preserves_existing_behaviour(self, monkeypatch):
+        # With the option unset, both json_path and data_path must be None so that
+        # cmsis_pack_manager.Cache falls back to its own default application data directory,
+        # exactly like the pre-existing pyOCD behaviour.
+        session = Session(None, **{'pack.cache_dir': None})
+
+        captured = {}
+        class FakeCache:
+            def __init__(self, silent, verify, json_path=None, data_path=None):
+                captured['json_path'] = json_path
+                captured['data_path'] = data_path
+        monkeypatch.setattr(cmsis_pack_manager, 'Cache', FakeCache)
+
+        pack_target.ManagedPacksImpl.get_pack_cache(session=session)
+
+        assert captured == {'json_path': None, 'data_path': None}
+
+    def test_get_installed_packs_uses_configured_cache(self, tmp_path, monkeypatch):
+        configured = str(tmp_path / "packcache")
+        session = Session(None, **{'pack.cache_dir': configured})  # noqa: F841 (kept alive for get_current())
+
+        captured = {}
+        class FakeCache:
+            def __init__(self, silent, verify, json_path=None, data_path=None):
+                captured['json_path'] = json_path
+                captured['data_path'] = data_path
+                self.data_path = data_path
+                self.index = {}
+            def packs_for_devices(self, devices):
+                return []
+        monkeypatch.setattr(cmsis_pack_manager, 'Cache', FakeCache)
+
+        # No explicit cache given; should be created via get_pack_cache() with the configured path.
+        results = pack_target.ManagedPacksImpl.get_installed_packs()
+
+        assert results == []
+        assert captured['json_path'] == configured
+        assert captured['data_path'] == configured

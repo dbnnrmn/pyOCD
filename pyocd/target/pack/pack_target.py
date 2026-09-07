@@ -56,6 +56,36 @@ except ImportError:
 
 LOG = logging.getLogger(__name__)
 
+def get_configured_pack_cache_path(session: Optional[Session] = None) -> Optional[str]:
+    """@brief Resolve the user-configured CMSIS-Pack storage path, if any.
+
+    This is the single, shared source of truth for where cmsis-pack-manager stores its pack
+    index (`index.json`, `aliases.json`) and downloaded `.pack`/`.pdsc` files. It is used both by
+    the `pyocd pack` CLI subcommands and by runtime discovery of managed packs, so both agree on
+    the same storage location.
+
+    @param session The Session to read the 'pack.cache_dir' option from. If not provided,
+        Session.get_current() is used, so this works even when there is no active session (for
+        instance, when a managed pack target is being populated automatically).
+    @return An absolute path to use for both the `data_path` and `json_path` parameters of
+        `cmsis_pack_manager.Cache`, or None if the option is not set. When None is returned,
+        cmsis-pack-manager falls back to its default, platform-specific application data
+        directory, preserving existing behaviour.
+
+    A relative path is resolved relative to the session's project directory (@ref
+    pyocd.core.session.Session.project_dir). `~` and environment variables are expanded, matching
+    the handling used for other file path options such as 'elf' and 'pack'.
+    """
+    if session is None:
+        session = Session.get_current()
+    path = session.options.get('pack.cache_dir')
+    if not path:
+        return None
+    path = os.path.expandvars(os.path.expanduser(path))
+    if not os.path.isabs(path):
+        path = os.path.join(session.project_dir, path)
+    return os.path.abspath(path)
+
 class ManagedPacksStub:
     @staticmethod
     def get_installed_packs(cache: Optional[object] = None) -> List:
@@ -66,7 +96,7 @@ class ManagedPacksStub:
         return []
 
     @staticmethod
-    def populate_target(device_name: str) -> None:
+    def populate_target(device_name: str, session: Optional[object] = None) -> None:
         pass
 
 class ManagedPacksImpl:
@@ -78,10 +108,30 @@ class ManagedPacksImpl:
     """
 
     @staticmethod
+    def get_pack_cache(
+            silent: bool = True,
+            verify: bool = True,
+            session: Optional[Session] = None
+            ) -> cmsis_pack_manager.Cache: # type:ignore
+        """@brief Create a cmsis_pack_manager.Cache using pyOCD's configured pack storage path.
+
+        This is the sole place where `cmsis_pack_manager.Cache` is instantiated without an
+        explicit, caller-provided cache, ensuring the 'pack.cache_dir' session option (see
+        @ref get_configured_pack_cache_path) is consistently honoured.
+
+        @param silent Passed through to `Cache()`'s `silent` parameter.
+        @param verify Passed through to `Cache()`'s `verify` parameter (the download verification
+            flag; note the parameter is silently named oddly by cmsis-pack-manager).
+        @param session Optional Session used to look up the configured cache path.
+        """
+        cache_path = get_configured_pack_cache_path(session)
+        return cmsis_pack_manager.Cache(silent, verify, json_path=cache_path, data_path=cache_path)
+
+    @staticmethod
     def get_installed_packs(cache: Optional[cmsis_pack_manager.Cache] = None) -> List[CmsisPackRef]: # type:ignore
         """@brief Return a list containing CmsisPackRef objects for all installed packs."""
         if cache is None:
-            cache = cmsis_pack_manager.Cache(True, True)
+            cache = ManagedPacksImpl.get_pack_cache(True, True)
         results = []
         # packs_for_devices() returns only unique packs.
         for pack in cache.packs_for_devices(cache.index.values()):
@@ -97,7 +147,7 @@ class ManagedPacksImpl:
     def get_installed_targets(cache: Optional[cmsis_pack_manager.Cache] = None) -> List[CmsisPackDevice]: # type:ignore
         """@brief Return a list of CmsisPackDevice objects for installed pack targets."""
         if cache is None:
-            cache = cmsis_pack_manager.Cache(True, True)
+            cache = ManagedPacksImpl.get_pack_cache(True, True)
         results = []
         for pack in ManagedPacks.get_installed_packs(cache=cache):
             try:
@@ -110,15 +160,18 @@ class ManagedPacksImpl:
         return sorted(results, key=lambda dev:dev.part_number)
 
     @staticmethod
-    def populate_target(device_name: str) -> None:
+    def populate_target(device_name: str, session: Optional[Session] = None) -> None:
         """@brief Add targets from cmsis-pack-manager matching the given name.
 
         Targets are added to the `#TARGET` list. A case-insensitive comparison against the
         device part number is used to find the target to populate. If multiple packs are installed
         that provide the same part numbers, all matching targets will be populated.
+
+        @param device_name Part number to search for.
+        @param session Optional Session used to look up the configured pack cache path.
         """
         device_name = normalise_target_type_name(device_name)
-        targets = ManagedPacks.get_installed_targets()
+        targets = ManagedPacks.get_installed_targets(cache=ManagedPacksImpl.get_pack_cache(session=session))
         for dev in targets:
             if device_name == normalise_target_type_name(dev.part_number):
                 PackTargets.populate_device(dev)

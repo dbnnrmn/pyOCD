@@ -23,7 +23,9 @@ import fnmatch
 
 from .base import SubcommandBase
 from ..core import exceptions
+from ..core.session import Session
 from ..target.pack import pack_target
+from ..utility.cmdline import convert_session_options
 
 try:
     import cmsis_pack_manager
@@ -43,8 +45,20 @@ class PackSubcommandBase(SubcommandBase):
         if not CPM_AVAILABLE:
             raise exceptions.CommandError("'pack' subcommand is not available because cmsis-pack-manager is not installed")
 
+        # Create a session with no probe just to load config files and resolve the configured
+        # pack cache path (the 'pack.cache_dir' option). This ensures the CLI and runtime managed
+        # pack discovery always agree on where CMSIS-Packs are stored.
+        session = Session(None,
+                            project_dir=self._args.project_dir,
+                            config_file=self._args.config,
+                            no_config=self._args.no_config,
+                            pack=self._args.pack,
+                            cbuild_run=self._args.cbuild_run,
+                            **convert_session_options(self._args.options)
+                            )
+
         verbosity = self._args.verbose - self._args.quiet
-        return cmsis_pack_manager.Cache(verbosity < 0, False)
+        return pack_target.ManagedPacks.get_pack_cache(verbosity < 0, False, session=session)
 
     def _get_matches(self, cache: "cmsis_pack_manager.Cache") -> Set[str]:
         if not cache.index:
@@ -76,7 +90,7 @@ class PackCleanSubcommand(PackSubcommandBase):
     def get_args(cls) -> List[argparse.ArgumentParser]:
         """@brief Add this subcommand to the subparsers object."""
         parser = argparse.ArgumentParser(description=cls.HELP, add_help=False)
-        return [cls.CommonOptions.LOGGING, parser]
+        return [cls.CommonOptions.COMMON, parser]
 
     def invoke(self) -> int:
         """@brief Handle 'clean' subcommand."""
@@ -101,7 +115,7 @@ class PackUpdateSubcommand(PackSubcommandBase):
         parser.add_argument("-c", "--clean", action='store_true',
             help="Erase existing pack information before updating.")
 
-        return [cls.CommonOptions.LOGGING, parser]
+        return [cls.CommonOptions.COMMON, parser]
 
     def invoke(self) -> int:
         """@brief Handle 'update' subcommand."""
@@ -131,7 +145,7 @@ class PackShowSubcommand(PackSubcommandBase):
         display_options.add_argument('-H', '--no-header', action='store_true',
             help="Don't print a table header.")
 
-        return [cls.CommonOptions.LOGGING, parser]
+        return [cls.CommonOptions.COMMON, parser]
 
     def invoke(self) -> int:
         """@brief Handle 'show' subcommand."""
@@ -171,7 +185,7 @@ class PackFindSubcommand(PackSubcommandBase):
         parser.add_argument("patterns", metavar="<pattern>", nargs='+',
             help="Glob-style pattern for matching a target part number.")
 
-        return [cls.CommonOptions.LOGGING, parser]
+        return [cls.CommonOptions.COMMON, parser]
 
     def invoke(self) -> int:
         """@brief Handle 'find' subcommand."""
@@ -233,7 +247,7 @@ class PackInstallSubcommand(PackSubcommandBase):
         parser.add_argument("patterns", metavar="<pattern>", nargs="+",
             help="Glob-style pattern for matching a target part number.")
 
-        return [cls.CommonOptions.LOGGING, parser]
+        return [cls.CommonOptions.COMMON, parser]
 
     def invoke(self) -> int:
         """@brief Handle 'find' subcommand."""
@@ -303,7 +317,7 @@ class PackSubcommand(PackSubcommandBase):
         pack_options.add_argument('-H', '--no-header', action='store_true',
             help="Don't print a table header.")
 
-        return [cls.CommonOptions.LOGGING, pack_parser]
+        return [cls.CommonOptions.COMMON, pack_parser]
 
     def invoke(self) -> int:
         """@brief Handle 'pack' subcommand."""
