@@ -274,6 +274,27 @@ Path or list of paths to CMSIS Device Family Packs. Devices defined in the pack(
 list of available targets.
 </td></tr>
 
+<tr><td>pack.cache_dir</td>
+<td>str</td>
+<td><i>No default</i></td>
+<td>
+Directory used to store the CMSIS-Pack index (`index.json`, `aliases.json`) and downloaded
+`.pack`/`.pdsc` files managed by cmsis-pack-manager. This same directory is used by both the
+`pyocd pack` subcommands and by automatic discovery of managed packs at runtime (for example when
+resolving a target type from an installed pack), so there is a single, consistent pack storage
+location.
+
+If this option is not set, the platform-specific default application data directory used by
+cmsis-pack-manager is used, preserving prior behaviour.
+
+A relative path is resolved relative to the session's project directory (see the `project_dir`
+option). `~` and environment variables (e.g., `$HOME` or `%LOCALAPPDATA%`) are expanded before the
+path is resolved. Set this option to make pyOCD's pack storage portable, for instance by pointing
+it at a directory relative to the project or installation directory rather than the user's
+per-machine application data folder. See the "Pack storage location" section of the
+<a href="{% link _docs/target_support.md %}">target support</a> documentation for an example.
+</td></tr>
+
 <tr><td>pack.debug_sequences.debugvars</td>
 <td>str</td>
 <td><i>No default</i></td>

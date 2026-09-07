@@ -102,6 +102,14 @@ BUILTIN_OPTIONS = [
     OptionInfo('pack', (str, list), None,
         "Path or list of paths to CMSIS Device Family Packs. Devices defined in the pack(s) are "
         "added to the list of available targets."),
+    OptionInfo('pack.cache_dir', str, None,
+        "Directory used to store the CMSIS-Pack index and downloaded pack/PDSC files managed by "
+        "cmsis-pack-manager (used by the 'pyocd pack' subcommands and by automatic managed-pack "
+        "target discovery). If not set, the platform-specific default application data directory "
+        "is used, preserving prior behaviour. A relative path is resolved relative to the "
+        "project directory. '~' and environment variables are expanded. Set this option to make "
+        "pyOCD's pack storage portable, for instance relative to the project directory or an "
+        "installation directory."),
     OptionInfo('pack.debug_sequences.debugvars', str, None,
         "Variable definition statements to change configurable debug sequence variables."),
     OptionInfo('pack.debug_sequences.disabled_sequences', (str, list), None,

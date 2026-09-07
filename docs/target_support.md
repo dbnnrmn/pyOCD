@@ -173,6 +173,33 @@ and you can immediately begin using the target support with the other `pyocd` su
 
 To get a list of all installed packs, use the `pack show` subcommand.
 
+##### Pack storage location
+
+By default, managed packs are stored in a platform-specific application data directory (for
+instance, under `%LOCALAPPDATA%` on Windows or `~/.cache` on Linux/macOS), shared across all pyOCD
+installations for the current user. This directory holds the pack index (`index.json`,
+`aliases.json`) as well as every downloaded `.pack`/`.pdsc` file.
+
+The storage location can be overridden with the `pack.cache_dir` session option, which is useful
+for a portable pyOCD installation (for example, one bundled with a project or distributed as a
+self-contained folder) where you don't want to depend on, or pollute, the user's per-machine
+application data directory. The same configured directory is used consistently by all `pyocd pack`
+subcommands and by pyOCD's automatic discovery of managed pack targets at runtime.
+
+A relative `pack.cache_dir` path is resolved relative to the project directory (the `project_dir`
+option), and `~` as well as environment variables are expanded. For example, to store packs in a
+`packs` directory next to a project's `pyocd.yaml` configuration file:
+
+```yaml
+pack.cache_dir: ./packs
+```
+
+Or, from the command line for a single invocation:
+
+    $ pyocd pack install -O pack.cache_dir=./packs stm32l073
+
+See the [`pack.cache_dir`]({% link _docs/options.md %}) session option reference for full details.
+
 
 #### Manual pack usage
 
